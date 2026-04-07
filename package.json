@@ -1,0 +1,29 @@
+{
+  "name": "nao-pos",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "postinstall": "prisma generate"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "axios": "^1.6.7",
+    "chart.js": "^4.4.1",
+    "exceljs": "^4.4.0",
+    "lucide-react": "^0.330.0",
+    "next": "14.1.0",
+    "react": "^18",
+    "react-chartjs-2": "^5.2.0",
+    "react-dom": "^18",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "eslint": "^8",
+    "eslint-config-next": "14.1.0",
+    "prisma": "^5.9.1"
+  }
+}
