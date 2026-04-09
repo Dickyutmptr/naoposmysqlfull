@@ -1,7 +1,6 @@
-import { PrismaClient } from '@prisma/client';
+export const dynamic = 'force-dynamic';
+import db from '../../../../lib/db';
 import { NextResponse } from 'next/server';
-
-const prisma = new PrismaClient();
 
 export async function PUT(request, { params }) {
     const { id } = params;
@@ -10,45 +9,30 @@ export async function PUT(request, { params }) {
         const { name, price, hpp, categoryId, image, recipes, isActive } = body;
 
         // Validate category exists
-        const cat = await prisma.category.findUnique({
-            where: { id: parseInt(categoryId) }
-        });
-
-        if (!cat) {
+        const [cat] = await db.execute('SELECT id FROM Category WHERE id = ?', [parseInt(categoryId)]);
+        if (cat.length === 0) {
             return NextResponse.json({ error: 'Kategori tidak ditemukan' }, { status: 400 });
         }
 
         // Update Product
-        const updatedProduct = await prisma.product.update({
-            where: { id: parseInt(id) },
-            data: {
-                name,
-                price: parseFloat(price),
-                hpp: parseFloat(hpp) || 0,
-                categoryId: cat.id,
-                image: image || '',
-                isActive: isActive !== undefined ? isActive : true
-            }
-        });
+        await db.execute(
+            'UPDATE Product SET name = ?, price = ?, hpp = ?, categoryId = ?, image = ?, isActive = ?, updatedAt = NOW() WHERE id = ?',
+            [name, parseFloat(price), parseFloat(hpp) || 0, parseInt(categoryId), image || '', isActive !== undefined ? (isActive ? 1 : 0) : 1, parseInt(id)]
+        );
 
         // Update Recipes: Delete existing then re-create
         if (recipes) {
-            await prisma.recipe.deleteMany({
-                where: { productId: parseInt(id) }
-            });
-
+            await db.execute('DELETE FROM Recipe WHERE productId = ?', [parseInt(id)]);
             for (const r of recipes) {
-                await prisma.recipe.create({
-                    data: {
-                        productId: parseInt(id),
-                        ingredientId: parseInt(r.ingredientId),
-                        amount: parseFloat(r.amount)
-                    }
-                });
+                await db.execute(
+                    'INSERT INTO Recipe (productId, ingredientId, amount) VALUES (?, ?, ?)',
+                    [parseInt(id), parseInt(r.ingredientId), parseFloat(r.amount)]
+                );
             }
         }
 
-        return NextResponse.json(updatedProduct);
+        const [updatedProduct] = await db.execute('SELECT * FROM Product WHERE id = ?', [parseInt(id)]);
+        return NextResponse.json(updatedProduct[0]);
     } catch (error) {
         console.error('Failed to update product:', error);
         return NextResponse.json({ error: 'Failed to update product' }, { status: 500 });
@@ -59,10 +43,10 @@ export async function DELETE(request, { params }) {
     const { id } = params;
     try {
         // Soft Delete Product (Set isDeleted = true)
-        await prisma.product.update({
-            where: { id: parseInt(id) },
-            data: { isDeleted: true, isActive: false }
-        });
+        await db.execute(
+            'UPDATE Product SET isDeleted = 1, isActive = 0, updatedAt = NOW() WHERE id = ?',
+            [parseInt(id)]
+        );
 
         return NextResponse.json({ message: 'Product deleted successfully' });
     } catch (error) {

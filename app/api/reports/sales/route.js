@@ -1,9 +1,7 @@
 export const dynamic = 'force-dynamic';
 
-import { PrismaClient } from '@prisma/client';
+import db from '../../../../lib/db';
 import { NextResponse } from 'next/server';
-
-const prisma = new PrismaClient();
 
 export async function GET(request) {
     try {
@@ -25,32 +23,40 @@ export async function GET(request) {
         const end = new Date(endDateStr);
         end.setUTCHours(16, 59, 59, 999);
 
-        // Fetch orders in range, only completed ones
-        const orders = await prisma.order.findMany({
-            where: {
-                createdAt: {
-                    gte: start,
-                    lte: end
-                },
-                status: 'completed'
-            },
-            include: {
-                items: {
-                    include: { product: true }
-                }
-            },
-            orderBy: { createdAt: 'asc' }
-        });
+        // Fetch completed orders
+        const [ordersRaw] = await db.execute(
+            'SELECT * FROM \`Order\` WHERE createdAt >= ? AND createdAt <= ? AND status = "completed" ORDER BY createdAt ASC',
+            [start, end]
+        );
 
-        const cancelledCount = await prisma.order.count({
-            where: {
-                createdAt: {
-                    gte: start,
-                    lte: end
-                },
-                status: 'cancelled'
-            }
-        });
+        let orders = ordersRaw;
+        if (orders.length > 0) {
+            const orderIds = orders.map(o => o.id);
+            const [fetchedItems] = await db.query(
+                `SELECT oi.*, p.name as productName, p.hpp as productHpp 
+                FROM OrderItem oi 
+                LEFT JOIN Product p ON oi.productId = p.id 
+                WHERE oi.orderId IN (?)`,
+                [orderIds]
+            );
+
+            // map items to orders
+            orders = ordersRaw.map(order => {
+                order.items = fetchedItems
+                    .filter(i => i.orderId === order.id)
+                    .map(i => ({
+                        ...i,
+                        product: { name: i.productName, hpp: i.productHpp }
+                    }));
+                return order;
+            });
+        }
+
+        const [cancelledCountResult] = await db.execute(
+            'SELECT COUNT(*) as count FROM \`Order\` WHERE createdAt >= ? AND createdAt <= ? AND status = "cancelled"',
+            [start, end]
+        );
+        const cancelledCount = cancelledCountResult[0].count;
 
         // Initialize Metrics
         let totalGrossSales = 0; // Total Payment (Final Amount)

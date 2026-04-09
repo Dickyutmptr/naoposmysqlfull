@@ -1,10 +1,6 @@
 export const dynamic = 'force-dynamic';
-import { PrismaClient } from '@prisma/client';
+import db from '../../../../lib/db';
 import { NextResponse } from 'next/server';
-
-const prisma = new PrismaClient();
-
-
 
 export async function POST(request) {
     try {
@@ -14,71 +10,51 @@ export async function POST(request) {
             return NextResponse.json({ error: 'Order ID is required' }, { status: 400 });
         }
 
-        const result = await prisma.$transaction(async (tx) => {
-            // 1. Find the order and its items
-            // We use findFirst because orderId is a string field, not the primary key 'id'
-            const order = await tx.order.findFirst({
-                where: { orderId: orderId },
-                include: { items: { include: { product: { include: { category: true } } } } }
-            });
+        const connection = await db.getConnection();
+        await connection.beginTransaction();
 
-            if (!order) {
-                throw new Error('Order not found');
-            }
+        try {
+            const [orderRows] = await connection.execute('SELECT * FROM \`Order\` WHERE orderId = ?', [orderId]);
+            if (orderRows.length === 0) throw new Error('Order not found');
+            const order = orderRows[0];
 
-            if (order.status === 'cancelled') {
-                throw new Error('Order is already cancelled');
-            }
-            if (order.status === 'completed') {
-                throw new Error('Order is already completed and cannot be cancelled');
-            }
+            if (order.status === 'cancelled') throw new Error('Order is already cancelled');
+            if (order.status === 'completed') throw new Error('Order is already completed and cannot be cancelled');
 
-            // 2. Restore Stock
-            // Loop through items and add back ingredients dynamically from DB
-            for (const item of order.items) {
-                const product = await tx.product.findUnique({
-                    where: { id: item.productId || item.product.id },
-                    include: { recipes: true }
-                });
+            const [items] = await connection.execute('SELECT * FROM OrderItem WHERE orderId = ?', [order.id]);
 
-                if (product && product.recipes && product.recipes.length > 0) {
-                    for (const recipe of product.recipes) {
-                        await tx.ingredient.update({
-                            where: { id: recipe.ingredientId },
-                            data: {
-                                stock: { increment: recipe.amount * item.qty }
-                            }
-                        });
+            for (const item of items) {
+                const [recipes] = await connection.execute('SELECT * FROM Recipe WHERE productId = ?', [item.productId]);
+                if (recipes.length > 0) {
+                    for (const recipe of recipes) {
+                        await connection.execute(
+                            'UPDATE Ingredient SET stock = stock + ? WHERE id = ?',
+                            [recipe.amount * item.qty, recipe.ingredientId]
+                        );
                     }
                 }
             }
 
-            // 3. Update Status
-            const updatedOrder = await tx.order.update({
-                where: { id: order.id },
-                data: {
-                    status: 'cancelled',
-                    kitchenStatus: 'cancelled',
-                    barStatus: 'cancelled',
-                    cancelReason: cancelReason || null,
-                    cancelNote: cancelNote || null
-                }
-            });
+            await connection.execute(
+                'UPDATE \`Order\` SET status = "cancelled", kitchenStatus = "cancelled", barStatus = "cancelled", cancelReason = ?, cancelNote = ?, updatedAt = NOW() WHERE id = ?',
+                [cancelReason || null, cancelNote || null, order.id]
+            );
 
-            // 4. Create Report for Cancellation
             const reportDesc = `Pembatalan Pesanan ${orderId}. Alasan: ${cancelReason || 'Lainya'}${cancelNote ? ` - "${cancelNote}"` : ''}`;
-            await tx.report.create({
-                data: {
-                    category: 'Kasir',
-                    description: reportDesc,
-                    userId: order.userId || 1
-                }
-            });
+            await connection.execute(
+                'INSERT INTO Report (category, description, userId, date) VALUES (?, ?, ?, NOW())',
+                ['Kasir', reportDesc, order.userId || 1]
+            );
 
-            return updatedOrder;
-        });
+            await connection.commit();
+            return NextResponse.json({ success: true, order: { ...order, status: 'cancelled' } });
 
-        return NextResponse.json({ success: true, order: result });
+        } catch (error) {
+            await connection.rollback();
+            throw error;
+        } finally {
+            connection.release();
+        }
 
     } catch (error) {
         console.error('Cancellation Error:', error);

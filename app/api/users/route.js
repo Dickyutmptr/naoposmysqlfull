@@ -1,14 +1,10 @@
 export const dynamic = 'force-dynamic';
-import { PrismaClient } from '@prisma/client';
+import db from '../../../lib/db';
 import { NextResponse } from 'next/server';
-
-const prisma = new PrismaClient();
 
 export async function GET() {
     try {
-        const users = await prisma.user.findMany({
-            orderBy: { createdAt: 'desc' }
-        });
+        const [users] = await db.execute('SELECT * FROM User ORDER BY createdAt DESC');
         return NextResponse.json(users);
     } catch (err) {
         console.error(err);
@@ -21,16 +17,18 @@ export async function POST(req) {
         const { username, password, name, role } = await req.json();
 
         // Check unique username
-        const existing = await prisma.user.findUnique({ where: { username } });
-        if (existing) {
+        const [existing] = await db.execute('SELECT id FROM User WHERE username = ?', [username]);
+        if (existing.length > 0) {
             return NextResponse.json({ error: 'Username sudah terpakai' }, { status: 400 });
         }
 
-        const user = await prisma.user.create({
-            data: { username, password, name, role }
-        });
+        const [result] = await db.execute(
+            'INSERT INTO User (username, password, name, role, createdAt, updatedAt) VALUES (?, ?, ?, ?, NOW(), NOW())',
+            [username, password, name, role || 'cashier']
+        );
 
-        return NextResponse.json(user, { status: 201 });
+        const [newUser] = await db.execute('SELECT * FROM User WHERE id = ?', [result.insertId]);
+        return NextResponse.json(newUser[0], { status: 201 });
     } catch (err) {
         console.error(err);
         return NextResponse.json({ error: 'Failed creating user' }, { status: 500 });
@@ -42,23 +40,25 @@ export async function PUT(req) {
         const { id, username, password, name, role } = await req.json();
 
         // Check if updating to a username that belongs to someone else
-        const existing = await prisma.user.findUnique({ where: { username } });
-        if (existing && existing.id !== id) {
+        const [existing] = await db.execute('SELECT id FROM User WHERE username = ?', [username]);
+        if (existing.length > 0 && existing[0].id !== id) {
             return NextResponse.json({ error: 'Username sudah dipakai orang lain' }, { status: 400 });
         }
 
-        const dataToUpdate = { username, name, role };
-        // Valid for password edit
         if (password) {
-            dataToUpdate.password = password;
+            await db.execute(
+                'UPDATE User SET username = ?, password = ?, name = ?, role = ?, updatedAt = NOW() WHERE id = ?',
+                [username, password, name, role, id]
+            );
+        } else {
+            await db.execute(
+                'UPDATE User SET username = ?, name = ?, role = ?, updatedAt = NOW() WHERE id = ?',
+                [username, name, role, id]
+            );
         }
 
-        const user = await prisma.user.update({
-            where: { id },
-            data: dataToUpdate
-        });
-
-        return NextResponse.json(user);
+        const [updatedUser] = await db.execute('SELECT * FROM User WHERE id = ?', [id]);
+        return NextResponse.json(updatedUser[0]);
     } catch (err) {
         console.error(err);
         return NextResponse.json({ error: 'Failed updating user' }, { status: 500 });
@@ -70,9 +70,7 @@ export async function DELETE(req) {
         const { searchParams } = new URL(req.url);
         const id = parseInt(searchParams.get('id'));
 
-        await prisma.user.delete({
-            where: { id }
-        });
+        await db.execute('DELETE FROM User WHERE id = ?', [id]);
 
         return NextResponse.json({ success: true });
     } catch (err) {

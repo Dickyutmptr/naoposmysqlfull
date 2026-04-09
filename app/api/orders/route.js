@@ -1,48 +1,24 @@
-import { PrismaClient } from '@prisma/client';
+export const dynamic = 'force-dynamic';
+import db from '../../../lib/db';
 import { NextResponse } from 'next/server';
 
-export const dynamic = 'force-dynamic';
-
-const prisma = new PrismaClient();
-
-// Hardcoded Recipes as requested
-const RECIPES = {
-    'Kopi Susu Gula Aren': { 'Kopi Beans': 15, 'Gula Aren': 20, 'Susu Cair': 100 },
-    'Bubble Gum': { 'Bubble Gum Powder': 30, 'Susu Cair': 50 },
-    'Americano': { 'Kopi Beans': 15 },
-    'Cappuccino': { 'Kopi Beans': 20 },
-    'French Fries': { 'Kentang': 100 },
-    'Nasi Goreng Spesial': { 'Beras': 150, 'Ayam': 50, 'Kecap Manis': 20 },
-    'Indomie Goreng': { 'Indomie': 1, 'Kecap Manis': 10 }
-};
-
-// Helper to generate Order ID: NB{DD}{MM}{YY}-{XXX}
-async function generateOrderId() {
+async function generateOrderId(connection) {
     const now = new Date();
-
-    // Use Jakarta Time for Order ID Date Part
     const dateStr = now.toLocaleDateString('id-ID', {
         day: '2-digit',
         month: '2-digit',
         year: '2-digit',
         timeZone: 'Asia/Jakarta'
-    }).split('/').join(''); // 11/02/24 -> 110224
+    }).split('/').join('');
 
-    // Find last order for today to increment
-    const lastOrder = await prisma.order.findFirst({
-        where: {
-            orderId: {
-                startsWith: `NB${dateStr}`
-            }
-        },
-        orderBy: {
-            id: 'desc'
-        }
-    });
+    const [lastOrders] = await connection.execute(
+        'SELECT orderId FROM \`Order\` WHERE orderId LIKE ? ORDER BY id DESC LIMIT 1',
+        [`NB${dateStr}-%`]
+    );
 
     let sequence = 1;
-    if (lastOrder) {
-        const parts = lastOrder.orderId.split('-');
+    if (lastOrders.length > 0) {
+        const parts = lastOrders[0].orderId.split('-');
         if (parts.length === 2) {
             sequence = parseInt(parts[1]) + 1;
         }
@@ -60,75 +36,74 @@ export async function GET(request) {
 
         const skip = (page - 1) * limit;
 
-        const whereClause = {};
+        let ordersQuery = 'SELECT * FROM \`Order\`';
+        let countQuery = 'SELECT COUNT(*) as total FROM \`Order\`';
+        const queryParams = [];
+
         if (search) {
-            whereClause.orderId = { contains: search };
+            ordersQuery += ' WHERE orderId LIKE ?';
+            countQuery += ' WHERE orderId LIKE ?';
+            queryParams.push(`%${search}%`);
         }
 
-        const [orders, total] = await prisma.$transaction([
-            prisma.order.findMany({
-                where: whereClause,
-                orderBy: { createdAt: 'desc' },
-                skip: skip,
-                take: limit,
-                include: {
-                    items: {
-                        include: {
-                            product: {
-                                include: { category: true }
-                            }
-                        }
-                    }
-                }
-            }),
-            prisma.order.count({ where: whereClause })
-        ]);
+        ordersQuery += ' ORDER BY createdAt DESC LIMIT ? OFFSET ?';
 
-        const formatted = orders.map(o => ({
-            id: o.orderId,
-            orderId: o.orderId,
-            queueNumber: o.queueNumber,
-            date: new Date(o.createdAt).toLocaleString('id-ID'),
-            total: o.finalAmount,
-            status: o.status,
-            kitchenStatus: o.kitchenStatus,
-            barStatus: o.barStatus,
-            customerName: o.customerName,
-            tableNumber: o.tableNumber,
-            cancelReason: o.cancelReason,
-            cancelNote: o.cancelNote,
-            createdAt: o.createdAt,
-            // Full items for KitchenBar - safe with optional chaining for deleted products
-            items: (o.items || []).map(i => ({
-                name: i.product?.name || 'Produk Dihapus',
+        // db.query supports dynamic binding
+        const finalParams = [...queryParams, limit, skip];
+        const [orders] = await db.query(ordersQuery, finalParams);
+        const [countResult] = await db.query(countQuery, queryParams);
+        const total = countResult[0].total;
+
+        let items = [];
+        if (orders.length > 0) {
+            const orderIds = orders.map(o => o.id);
+            const [fetchedItems] = await db.query(`
+                SELECT oi.*, p.name as productName, c.name as categoryName, c.id as categoryId 
+                FROM OrderItem oi 
+                LEFT JOIN Product p ON oi.productId = p.id 
+                LEFT JOIN Category c ON p.categoryId = c.id 
+                WHERE oi.orderId IN (?)
+            `, [orderIds]);
+            items = fetchedItems;
+        }
+
+        const formatted = orders.map(o => {
+            const orderItems = items.filter(i => i.orderId === o.id).map(i => ({
+                name: i.productName || 'Produk Dihapus',
                 qty: i.qty,
                 note: i.note || '',
                 product: {
-                    name: i.product?.name || 'Produk Dihapus',
-                    category: i.product?.category || null,
-                    kategori: i.product?.category?.name || ''
+                    name: i.productName || 'Produk Dihapus',
+                    category: i.categoryId ? { id: i.categoryId, name: i.categoryName } : null,
+                    kategori: i.categoryName || ''
                 }
-            })),
-            // String summary for History
-            itemsSummary: (o.items || []).map(i => `${i.product?.name || 'Produk Dihapus'} (${i.qty})`).join(', ')
-        }));
+            }));
 
-        console.log(`[GET /api/orders] Returning ${formatted.length} orders. Latest: ${formatted[0]?.orderId}`);
+            return {
+                id: o.orderId,
+                orderId: o.orderId,
+                queueNumber: o.queueNumber,
+                date: new Date(o.createdAt).toLocaleString('id-ID'),
+                total: o.finalAmount,
+                status: o.status,
+                kitchenStatus: o.kitchenStatus,
+                barStatus: o.barStatus,
+                customerName: o.customerName,
+                tableNumber: o.tableNumber,
+                cancelReason: o.cancelReason,
+                cancelNote: o.cancelNote,
+                createdAt: o.createdAt,
+                items: orderItems,
+                itemsSummary: orderItems.map(i => `${i.name} (${i.qty})`).join(', ')
+            };
+        });
+
         return NextResponse.json({
             data: formatted,
-            meta: {
-                total,
-                page,
-                lastPage: Math.ceil(total / limit) || 1,
-                limit
-            }
-        }, {
-            headers: {
-                'Cache-Control': 'no-store, max-age=0'
-            }
+            meta: { total, page, lastPage: Math.ceil(total / limit) || 1, limit }
         });
     } catch (err) {
-        console.error('[GET /api/orders] Error:', err.message, err.stack);
+        console.error('Error fetching orders:', err);
         return NextResponse.json({ error: 'Failed to fetch orders', detail: err.message }, { status: 500 });
     }
 }
@@ -138,43 +113,29 @@ export async function POST(request) {
         const body = await request.json();
         const { cart, subtotal, tax, finalTotal, memberId, discount, serviceCharge, paymentMethod, cashGiven, serviceType, customerName, tableNumber, userId } = body;
 
-        console.log('[ORDER POST] Received body:', JSON.stringify({ cart: cart?.length, customerName, tableNumber, userId, finalTotal }));
-
         if (!cart || cart.length === 0) {
             return NextResponse.json({ error: 'Cart is empty' }, { status: 400 });
         }
 
-        // Transaction: Create Order -> Create Items -> Deduct Stock
-        const result = await prisma.$transaction(async (tx) => {
-            // ... (packaging logic remains same)
+        const connection = await db.getConnection();
+        await connection.beginTransaction();
 
+        try {
             for (const item of cart) {
-                // Fetch product WITH recipes -> ingredients
-                const product = await tx.product.findUnique({
-                    where: { id: item.id },
-                    include: {
-                        category: true,
-                        recipes: { include: { ingredient: true } }
-                    }
-                });
+                const [productRows] = await connection.execute('SELECT id, name FROM Product WHERE id = ?', [item.id]);
+                if (productRows.length === 0) throw new Error(`Product ${item.nama || item.name} not found`);
 
-                if (!product) throw new Error(`Product ${item.nama} not found`);
+                const [recipes] = await connection.execute('SELECT * FROM Recipe WHERE productId = ?', [item.id]);
 
-                // Dynamic Stock Check
-                if (product.recipes && product.recipes.length > 0) {
-                    for (const recipe of product.recipes) {
+                if (recipes.length > 0) {
+                    for (const recipe of recipes) {
                         const required = recipe.amount * item.qty;
-                        // Determine current stock from the recipe's ingredient relation
-                        // (Note: recipe.ingredient gives us the state at time of fetch, 
-                        // but for specific row locking or re-fetching, usually safer to fetch ingredient fresh 
-                        // or rely on the loaded data if concurrency is low. 
-                        // To be safe and adhere to previous logic, let's fetch ingredient row to get latest stock)
+                        const [ingredientRows] = await connection.execute('SELECT stock, name FROM Ingredient WHERE id = ? FOR UPDATE', [recipe.ingredientId]);
 
-                        const ingredient = await tx.ingredient.findUnique({ where: { id: recipe.ingredientId } });
-
-                        if (!ingredient) {
-                            throw new Error(`Bahan untuk ${product.name} tidak ditemukan`);
+                        if (ingredientRows.length === 0) {
+                            throw new Error(`Bahan untuk ${productRows[0].name} tidak ditemukan`);
                         }
+                        const ingredient = ingredientRows[0];
 
                         if (ingredient.stock < required) {
                             throw new Error(`Stok tidak cukup untuk ${ingredient.name}. Butuh: ${required}, Ada: ${ingredient.stock}`);
@@ -183,94 +144,75 @@ export async function POST(request) {
                 }
             }
 
-
-            // 1. Check Station Requirement
-            // Determine if Kitchen or Bar is needed based on items
-            // Kitchen: makanan, cemilan directly mapped from product category
-            // Bar: coffee, non-coffee, minuman
             let needsKitchen = false;
             let needsBar = false;
 
             for (const item of cart) {
-                const product = await tx.product.findUnique({ where: { id: item.id }, include: { category: true } });
-                if (product) {
-                    const cat = product.category ? product.category.name.toLowerCase().trim() : '';
-                    // Kitchen: Makanan, Snack (dan variasi penulisan)
-                    if (['makanan', 'snack', 'snacks', 'cemilan', 'makanan & snack', 'makanan dan snack'].includes(cat)) {
-                        needsKitchen = true;
+                const [productRows] = await connection.execute('SELECT categoryId FROM Product WHERE id = ?', [item.id]);
+                if (productRows.length > 0) {
+                    const categoryId = productRows[0].categoryId;
+                    const [catRows] = await connection.execute('SELECT name FROM Category WHERE id = ?', [categoryId]);
+                    if (catRows.length > 0) {
+                        const catStatus = catRows[0].name.toLowerCase().trim();
+                        if (['makanan', 'snack', 'snacks', 'cemilan', 'makanan & snack', 'makanan dan snack'].includes(catStatus)) {
+                            needsKitchen = true;
+                        } else {
+                            needsBar = true;
+                        }
                     } else {
-                        // Kalau bukan makanan/snack, selalu munculkan di bar (termasuk minuman, add-on, dessert baru, dsb)
                         needsBar = true;
                     }
                 }
             }
 
-            // 2. Generate ID
-            const orderId = await generateOrderId();
-
-            // 3. Create Order
+            const orderId = await generateOrderId(connection);
+            const queueNumber = parseInt(orderId.split('-')[1]);
             const initialStatus = (!needsKitchen && !needsBar) ? 'completed' : 'pending';
 
-            const newOrder = await tx.order.create({
-                data: {
-                    orderId,
-                    queueNumber: parseInt(orderId.split('-')[1]),
-                    customerName: customerName || 'Guest',
-                    tableNumber: tableNumber ? String(tableNumber) : null,
-                    totalAmount: subtotal || 0,
-                    taxAmount: tax || 0,
-                    discountAmount: discount || 0,
-                    serviceCharge: serviceCharge || 0,
-                    finalAmount: finalTotal || 0,
-                    paymentMethod: paymentMethod || 'cash',
-                    status: initialStatus,
-                    kitchenStatus: needsKitchen ? 'pending' : 'done',
-                    barStatus: needsBar ? 'pending' : 'done',
-                    userId: userId || 1,
-                    memberId: memberId || null
-                }
-            });
+            const [orderResult] = await connection.execute(
+                `INSERT INTO \`Order\` (
+                    orderId, queueNumber, customerName, tableNumber, memberId, totalAmount, taxAmount, discountAmount, serviceCharge, finalAmount, paymentMethod, status, kitchenStatus, barStatus, userId, createdAt, updatedAt
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+                [
+                    orderId, queueNumber, customerName || 'Guest', tableNumber ? String(tableNumber) : null, memberId || null,
+                    subtotal || 0, tax || 0, discount || 0, serviceCharge || 0, finalTotal || 0, paymentMethod || 'cash',
+                    initialStatus, needsKitchen ? 'pending' : 'done', needsBar ? 'pending' : 'done', userId || 1
+                ]
+            );
 
-            // 4. Create OrderItems & Deduct Stock
+            const insertedOrderId = orderResult.insertId;
+
             for (const item of cart) {
-                // Create Item
-                await tx.orderItem.create({
-                    data: {
-                        orderId: newOrder.id,
-                        productId: item.id,
-                        qty: item.qty,
-                        price: item.price,
-                        note: item.notes ? item.notes.join(', ') : ''
-                    }
-                });
+                await connection.execute(
+                    'INSERT INTO OrderItem (orderId, productId, qty, price, note) VALUES (?, ?, ?, ?, ?)',
+                    [insertedOrderId, item.id, item.qty, item.price, item.notes ? item.notes.join(', ') : '']
+                );
 
-                // Deduct Ingredients
-                const product = await tx.product.findUnique({
-                    where: { id: item.id },
-                    include: { recipes: true }
-                });
-
-                if (product.recipes && product.recipes.length > 0) {
-                    for (const recipe of product.recipes) {
-                        await tx.ingredient.update({
-                            where: { id: recipe.ingredientId },
-                            data: {
-                                stock: { decrement: recipe.amount * item.qty }
-                            }
-                        });
+                const [recipes] = await connection.execute('SELECT * FROM Recipe WHERE productId = ?', [item.id]);
+                if (recipes.length > 0) {
+                    for (const recipe of recipes) {
+                        await connection.execute(
+                            'UPDATE Ingredient SET stock = stock - ? WHERE id = ?',
+                            [recipe.amount * item.qty, recipe.ingredientId]
+                        );
                     }
                 }
             }
 
-            return newOrder;
-        });
+            await connection.commit();
 
-        // Return orderId and queueNumber so POS.js can use them for receipt printing
-        return NextResponse.json({
-            ...result,
-            orderId: result.orderId,
-            queueNumber: result.queueNumber
-        }, { status: 201 });
+            return NextResponse.json({
+                orderId: orderId,
+                queueNumber: queueNumber
+            }, { status: 201 });
+
+        } catch (error) {
+            await connection.rollback();
+            throw error;
+        } finally {
+            connection.release();
+        }
+
     } catch (error) {
         console.error('Checkout Error:', error);
         return NextResponse.json({ error: error.message || 'Checkout failed' }, { status: 500 });
@@ -280,41 +222,34 @@ export async function POST(request) {
 export async function PUT(request) {
     try {
         const body = await request.json();
-        const { orderId, type } = body; // type: 'kitchen' or 'bar'
+        const { orderId, type } = body;
 
         if (!orderId || !type) {
             return NextResponse.json({ error: 'Missing orderId or type' }, { status: 400 });
         }
 
-        const updateData = {};
-        if (type === 'kitchen') updateData.kitchenStatus = 'done';
-        if (type === 'bar') updateData.barStatus = 'done';
+        const updateData = [];
+        let queryUpdate = 'UPDATE \`Order\` SET updatedAt = NOW()';
 
-        // 1. Update the station status
-        // We use orderId string for finding, but update needs unique ID if using `update`? 
-        // Nope, `update` works with unique fields. `orderId` should be unique ideally. 
-        // Prisma schema defines orderId as unique? Let's assume so or use findFirst + update id.
-        // Previously we used `where: { orderId: orderId }`.
+        if (type === 'kitchen') {
+            queryUpdate += ", kitchenStatus = 'done'";
+        }
+        if (type === 'bar') {
+            queryUpdate += ", barStatus = 'done'";
+        }
 
-        const order = await prisma.order.update({
-            where: { orderId: orderId },
-            data: updateData
-        });
+        queryUpdate += ' WHERE orderId = ?';
+        updateData.push(orderId);
 
-        // 2. Check if order is fully complete
-        // Since we updated one part, check if the OTHER part is also done.
-        // We can check the returned `order` object directly if we assume it returns updated fields.
-        // Prisma `update` returns the updated object.
+        await db.execute(queryUpdate, updateData);
 
+        const [orders] = await db.execute('SELECT * FROM \`Order\` WHERE orderId = ?', [orderId]);
+        const order = orders[0];
         let finalStatus = order.status;
 
         if (order.kitchenStatus === 'done' && order.barStatus === 'done') {
             finalStatus = 'completed';
-            // Update main status
-            await prisma.order.update({
-                where: { id: order.id },
-                data: { status: 'completed' }
-            });
+            await db.execute('UPDATE \`Order\` SET status = "completed" WHERE id = ?', [order.id]);
         }
 
         return NextResponse.json({ success: true, order: { ...order, status: finalStatus } });

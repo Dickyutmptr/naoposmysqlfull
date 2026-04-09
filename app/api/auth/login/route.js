@@ -1,16 +1,13 @@
 export const dynamic = 'force-dynamic';
-import { PrismaClient } from '@prisma/client';
+import db from '../../../../lib/db';
 import { NextResponse } from 'next/server';
-
-const prisma = new PrismaClient();
 
 export async function POST(req) {
     try {
         const { username, password } = await req.json();
 
-        const user = await prisma.user.findUnique({
-            where: { username }
-        });
+        const [rows] = await db.execute('SELECT * FROM User WHERE username = ?', [username]);
+        const user = rows[0];
 
         if (!user || user.password !== password) { // Simple password check for now
             return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
