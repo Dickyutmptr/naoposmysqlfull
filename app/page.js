@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import POS from './components/POS';
 import Inventory from './components/Inventory';
 import Dashboard from './components/Dashboard';
@@ -18,6 +18,8 @@ export default function Home() {
     const [user, setUser] = useState(null); // { id, username, role, name }
     const [view, setView] = useState('pos');
     const [showAccessDenied, setShowAccessDenied] = useState(false);
+    const [showExitConfirm, setShowExitConfirm] = useState(false);
+    const isExiting = useRef(false);
 
     // Access Control Configuration
     const PERMISSIONS = {
@@ -53,6 +55,40 @@ export default function Home() {
             setShowAccessDenied(true);
         }
     };
+
+    useEffect(() => {
+        // 1. Mencegah reload / tutup tab secara tidak sengaja
+        const handleBeforeUnload = (e) => {
+            if (isExiting.current) return;
+            e.preventDefault();
+            e.returnValue = ''; // Standard untuk browser modern
+            return '';
+        };
+
+        window.addEventListener('beforeunload', handleBeforeUnload);
+
+        // 2. Mencegah tombol back di Android/Browser langsung keluar
+        // Push history awal supaya ada state untuk di-"back" tanpa keluar web app
+        window.history.pushState(null, '', window.location.href);
+
+        const handlePopState = (e) => {
+            if (isExiting.current) return;
+
+            // Ketika menekan back, popstate akan terpanggil.
+            // Kita langsung push state lagi agar tidak keluar dari web.
+            window.history.pushState(null, '', window.location.href);
+            
+            // Tampilkan alert konfirmasi dengan custom modal
+            setShowExitConfirm(true);
+        };
+
+        window.addEventListener('popstate', handlePopState);
+
+        return () => {
+            window.removeEventListener('beforeunload', handleBeforeUnload);
+            window.removeEventListener('popstate', handlePopState);
+        };
+    }, []);
 
     // If not logged in, show Login
     if (!user) {
@@ -110,6 +146,47 @@ export default function Home() {
                         >
                             TUTUP
                         </button>
+                    </div>
+                </div>
+            )}
+
+            {showExitConfirm && (
+                <div style={{
+                    position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+                    background: 'rgba(15, 52, 96, 0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999,
+                    backdropFilter: 'blur(4px)'
+                }}>
+                    <div style={{
+                        background: '#ffffff', padding: 30, borderRadius: 16, width: '90%', maxWidth: 400,
+                        border: '1px solid #cbd5e1', boxShadow: '0 10px 25px rgba(0,0,0,0.1)', textAlign: 'center'
+                    }}>
+                        <div style={{ background: '#fef2f2', color: '#ef4444', width: 60, height: 60, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px', fontSize: 24 }}>
+                            ⚠️
+                        </div>
+                        <h3 style={{ color: '#0f3460', fontSize: 20, fontWeight: 'bold', margin: '0 0 10px 0' }}>
+                            Konfirmasi Keluar
+                        </h3>
+                        <p style={{ color: '#64748b', marginBottom: 25, fontSize: 14 }}>
+                            Apakah Anda yakin ingin keluar dari halaman? Perubahan yang belum disimpan mungkin akan hilang.
+                        </p>
+                        <div style={{ display: 'flex', gap: '10px' }}>
+                            <button
+                                onClick={() => setShowExitConfirm(false)}
+                                style={{ flex: 1, padding: '12px 15px', background: '#e2e8f0', color: '#475569', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 'bold', fontSize: 14 }}
+                            >
+                                BATAL
+                            </button>
+                            <button
+                                onClick={() => {
+                                    isExiting.current = true;
+                                    setShowExitConfirm(false);
+                                    window.history.go(-2);
+                                }}
+                                style={{ flex: 1, padding: '12px 15px', background: '#ef4444', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 'bold', fontSize: 14 }}
+                            >
+                                YA, KELUAR
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}

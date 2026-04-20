@@ -4,10 +4,10 @@ import { NextResponse } from 'next/server';
 
 export async function GET() {
     try {
-        const [ingredients] = await db.execute('SELECT * FROM Ingredient ORDER BY name ASC');
+        const [ingredients] = await db.execute('SELECT * FROM ingredient ORDER BY name ASC');
         return NextResponse.json(ingredients);
     } catch (err) {
-        return NextResponse.json({ error: 'Failed to fetch ingredients' }, { status: 500 });
+        return NextResponse.json({ error: 'Failed to fetch Ingredients' }, { status: 500 });
     }
 }
 
@@ -21,24 +21,24 @@ export async function POST(request) {
             return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
         }
 
-        const [existing] = await db.execute('SELECT id FROM Ingredient WHERE name = ?', [name]);
+        const [existing] = await db.execute('SELECT id FROM ingredient WHERE name = ?', [name]);
 
         let ingredientId;
         if (existing.length > 0) {
             ingredientId = existing[0].id;
             await db.execute(
-                'UPDATE Ingredient SET sku = ?, stock = ?, unit = ?, minStockThreshold = ?, category = ?, updatedAt = NOW() WHERE id = ?',
+                'UPDATE ingredient SET sku = ?, stock = ?, unit = ?, minStockThreshold = ?, category = ?, updatedAt = NOW() WHERE id = ?',
                 [sku || null, parseFloat(stock), unit, parseFloat(minStockThreshold || 0), category || 'minuman', ingredientId]
             );
         } else {
             const [result] = await db.execute(
-                'INSERT INTO Ingredient (sku, name, stock, unit, minStockThreshold, category, updatedAt) VALUES (?, ?, ?, ?, ?, ?, NOW())',
+                'INSERT INTO ingredient (sku, name, stock, unit, minStockThreshold, category, updatedAt) VALUES (?, ?, ?, ?, ?, ?, NOW())',
                 [sku || null, name, parseFloat(stock), unit, parseFloat(minStockThreshold || 0), category || 'minuman']
             );
             ingredientId = result.insertId;
         }
 
-        const [ingredient] = await db.execute('SELECT * FROM Ingredient WHERE id = ?', [ingredientId]);
+        const [ingredient] = await db.execute('SELECT * FROM ingredient WHERE id = ?', [ingredientId]);
         return NextResponse.json(ingredient[0]);
     } catch (err) {
         console.error(err);
@@ -58,8 +58,8 @@ export async function DELETE(request) {
         const ingredientId = parseInt(id);
 
         // Delete associated recipes first (cascade manually)
-        await db.execute('DELETE FROM Recipe WHERE ingredientId = ?', [ingredientId]);
-        await db.execute('DELETE FROM Ingredient WHERE id = ?', [ingredientId]);
+        await db.execute('DELETE FROM recipe WHERE ingredientId = ?', [ingredientId]);
+        await db.execute('DELETE FROM ingredient WHERE id = ?', [ingredientId]);
 
         return NextResponse.json({ message: 'Deleted successfully' });
     } catch (err) {
@@ -79,11 +79,11 @@ export async function PUT(request) {
         }
 
         await db.execute(
-            'UPDATE Ingredient SET sku = ?, name = ?, stock = ?, unit = ?, minStockThreshold = ?, category = ?, updatedAt = NOW() WHERE id = ?',
+            'UPDATE ingredient SET sku = ?, name = ?, stock = ?, unit = ?, minStockThreshold = ?, category = ?, updatedAt = NOW() WHERE id = ?',
             [sku || null, name, parseFloat(stock), unit, parseFloat(minStockThreshold || 0), category || 'minuman', parseInt(id)]
         );
 
-        const [ingredient] = await db.execute('SELECT * FROM Ingredient WHERE id = ?', [parseInt(id)]);
+        const [ingredient] = await db.execute('SELECT * FROM ingredient WHERE id = ?', [parseInt(id)]);
         return NextResponse.json(ingredient[0]);
     } catch (err) {
         console.error('PUT Error:', err);

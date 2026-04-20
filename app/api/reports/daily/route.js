@@ -19,8 +19,8 @@ export async function GET(request) {
 
         const [reports] = await db.execute(`
             SELECT r.*, u.name as userName, u.role as userRole 
-            FROM Report r 
-            LEFT JOIN User u ON r.userId = u.id 
+            FROM report r 
+            LEFT JOIN user u ON r.userId = u.id 
             WHERE r.date >= ? AND r.date <= ?
             ORDER BY r.date DESC
         `, [start, end]);
@@ -75,11 +75,11 @@ export async function POST(request) {
         const formattedDate = new Date(date).toISOString().slice(0, 19).replace('T', ' ');
 
         const [result] = await db.execute(
-            'INSERT INTO Report (date, category, description, imageUrl, userId) VALUES (?, ?, ?, ?, ?)',
+            'INSERT INTO report (date, category, description, imageUrl, userId) VALUES (?, ?, ?, ?, ?)',
             [formattedDate, category, description, imageUrl, parseInt(userId)]
         );
 
-        const [newReport] = await db.execute('SELECT * FROM Report WHERE id = ?', [result.insertId]);
+        const [newReport] = await db.execute('SELECT * FROM report WHERE id = ?', [result.insertId]);
 
         return NextResponse.json(newReport[0], { status: 201 });
     } catch (error) {

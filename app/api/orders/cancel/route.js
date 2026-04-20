@@ -14,21 +14,21 @@ export async function POST(request) {
         await connection.beginTransaction();
 
         try {
-            const [orderRows] = await connection.execute('SELECT * FROM \`Order\` WHERE orderId = ?', [orderId]);
+            const [orderRows] = await connection.execute('SELECT * FROM \`order\` WHERE orderId = ?', [orderId]);
             if (orderRows.length === 0) throw new Error('Order not found');
             const order = orderRows[0];
 
             if (order.status === 'cancelled') throw new Error('Order is already cancelled');
             if (order.status === 'completed') throw new Error('Order is already completed and cannot be cancelled');
 
-            const [items] = await connection.execute('SELECT * FROM OrderItem WHERE orderId = ?', [order.id]);
+            const [items] = await connection.execute('SELECT * FROM orderitem WHERE orderId = ?', [order.id]);
 
             for (const item of items) {
-                const [recipes] = await connection.execute('SELECT * FROM Recipe WHERE productId = ?', [item.productId]);
+                const [recipes] = await connection.execute('SELECT * FROM recipe WHERE productId = ?', [item.productId]);
                 if (recipes.length > 0) {
                     for (const recipe of recipes) {
                         await connection.execute(
-                            'UPDATE Ingredient SET stock = stock + ? WHERE id = ?',
+                            'UPDATE ingredient SET stock = stock + ? WHERE id = ?',
                             [recipe.amount * item.qty, recipe.ingredientId]
                         );
                     }
@@ -36,13 +36,13 @@ export async function POST(request) {
             }
 
             await connection.execute(
-                'UPDATE \`Order\` SET status = "cancelled", kitchenStatus = "cancelled", barStatus = "cancelled", cancelReason = ?, cancelNote = ?, updatedAt = NOW() WHERE id = ?',
+                'UPDATE \`order\` SET status = "cancelled", kitchenStatus = "cancelled", barStatus = "cancelled", cancelReason = ?, cancelNote = ?, updatedAt = NOW() WHERE id = ?',
                 [cancelReason || null, cancelNote || null, order.id]
             );
 
             const reportDesc = `Pembatalan Pesanan ${orderId}. Alasan: ${cancelReason || 'Lainya'}${cancelNote ? ` - "${cancelNote}"` : ''}`;
             await connection.execute(
-                'INSERT INTO Report (category, description, userId, date) VALUES (?, ?, ?, NOW())',
+                'INSERT INTO report (category, description, userId, date) VALUES (?, ?, ?, NOW())',
                 ['Kasir', reportDesc, order.userId || 1]
             );
 

@@ -4,8 +4,8 @@ import { NextResponse } from 'next/server';
 
 export async function GET() {
     try {
-        const [products] = await db.execute('SELECT p.*, c.name as categoryName FROM Product p LEFT JOIN Category c ON p.categoryId = c.id WHERE p.isDeleted = 0');
-        const [recipes] = await db.execute('SELECT r.*, i.stock as ingredientStock, i.name as ingredientName FROM Recipe r LEFT JOIN Ingredient i ON r.ingredientId = i.id');
+        const [products] = await db.execute('SELECT p.*, c.name as categoryName FROM product p LEFT JOIN category c ON p.categoryId = c.id WHERE p.isDeleted = 0');
+        const [recipes] = await db.execute('SELECT r.*, i.stock as ingredientStock, i.name as ingredientName FROM recipe r LEFT JOIN ingredient i ON r.ingredientId = i.id');
 
         const productsWithStock = products.map(product => {
             let maxStock = Infinity;
@@ -60,14 +60,14 @@ export async function POST(request) {
         const { name, price, hpp, categoryId, image, recipes } = body;
 
         // Validate category exists
-        const [cat] = await db.execute('SELECT id FROM Category WHERE id = ?', [parseInt(categoryId)]);
+        const [cat] = await db.execute('SELECT id FROM category WHERE id = ?', [parseInt(categoryId)]);
         if (cat.length === 0) {
             return NextResponse.json({ error: 'Kategori tidak ditemukan' }, { status: 400 });
         }
 
         // Create Product
         const [result] = await db.execute(
-            'INSERT INTO Product (name, price, hpp, categoryId, image, isActive, isDeleted, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, 1, 0, NOW(), NOW())',
+            'INSERT INTO product (name, price, hpp, categoryId, image, isActive, isDeleted, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, 1, 0, NOW(), NOW())',
             [name, parseFloat(price), parseFloat(hpp) || 0, parseInt(categoryId), image || '']
         );
         const productId = result.insertId;
@@ -76,13 +76,13 @@ export async function POST(request) {
         if (recipes && recipes.length > 0) {
             for (const r of recipes) {
                 await db.execute(
-                    'INSERT INTO Recipe (productId, ingredientId, amount) VALUES (?, ?, ?)',
+                    'INSERT INTO recipe (productId, ingredientId, amount) VALUES (?, ?, ?)',
                     [productId, parseInt(r.ingredientId), parseFloat(r.amount)]
                 );
             }
         }
 
-        const [newProduct] = await db.execute('SELECT * FROM Product WHERE id = ?', [productId]);
+        const [newProduct] = await db.execute('SELECT * FROM product WHERE id = ?', [productId]);
         return NextResponse.json(newProduct[0]);
 
     } catch (error) {

@@ -16,6 +16,11 @@ export default function Members({ onHome, user }) {
     const [confirmDelete, setConfirmDelete] = useState({ isOpen: false, id: null, name: '' });
     const [successModal, setSuccessModal] = useState({ isOpen: false, message: '' });
     
+    // Pagination State
+    const [currentPage, setCurrentPage] = useState(1);
+    const [totalPages, setTotalPages] = useState(1);
+    const [totalMembersCount, setTotalMembersCount] = useState(0);
+
     // Global Settings State
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [globalSettings, setGlobalSettings] = useState({ member: 5, owner: 100 });
@@ -60,14 +65,22 @@ export default function Members({ onHome, user }) {
         }
     };
 
-    const fetchMembers = async (query = '') => {
+    const fetchMembers = async (query = '', page = 1) => {
         setLoading(true);
         try {
-            const url = query ? `/api/members/search?q=${encodeURIComponent(query)}` : '/api/members';
+            const url = query ? `/api/members/search?q=${encodeURIComponent(query)}&page=${page}&limit=50` : `/api/members?page=${page}&limit=50`;
             const res = await fetch(url);
             if (!res.ok) throw new Error('Failed to fetch members');
             const data = await res.json();
-            setMembers(data);
+            
+            if (data.data) {
+                setMembers(data.data);
+                setTotalPages(data.totalPages);
+                setTotalMembersCount(data.totalCount);
+                setCurrentPage(data.page);
+            } else {
+                setMembers(data);
+            }
         } catch (err) {
             setError(err.message);
         } finally {
@@ -77,7 +90,15 @@ export default function Members({ onHome, user }) {
 
     const handleSearch = (e) => {
         e.preventDefault();
-        fetchMembers(searchQuery);
+        setCurrentPage(1);
+        fetchMembers(searchQuery, 1);
+    };
+
+    const handlePageChange = (newPage) => {
+        if (newPage >= 1 && newPage <= totalPages) {
+            setCurrentPage(newPage);
+            fetchMembers(searchQuery, newPage);
+        }
     };
 
     const handleSubmit = async (e) => {
@@ -112,8 +133,9 @@ export default function Members({ onHome, user }) {
             } else {
                 if (!searchQuery) {
                     setMembers([member, ...members]);
+                    setTotalMembersCount(prev => prev + 1);
                 } else {
-                    fetchMembers(searchQuery);
+                    fetchMembers(searchQuery, currentPage);
                 }
                 setSuccessModal({ isOpen: true, message: 'Member berhasil ditambahkan!' });
             }
@@ -161,6 +183,7 @@ export default function Members({ onHome, user }) {
             }
 
             setMembers(members.filter(m => m.id !== id));
+            setTotalMembersCount(prev => prev - 1);
             setConfirmDelete({ isOpen: false, id: null, name: '' });
         } catch (err) {
             alert(err.message);
@@ -275,7 +298,7 @@ export default function Members({ onHome, user }) {
                             <button
                                 type="button"
                                 className="secondary"
-                                onClick={() => { setSearchQuery(''); fetchMembers(''); }}
+                                onClick={() => { setSearchQuery(''); setCurrentPage(1); fetchMembers('', 1); }}
                                 style={{ width: 'auto' }}
                             >
                                 RESET
@@ -284,8 +307,11 @@ export default function Members({ onHome, user }) {
                     </div>
 
                     <div style={{ flex: 1, background: 'white', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 4px 6px rgba(0,0,0,0.05)', display: 'flex', flexDirection: 'column' }}>
-                        <h3 style={{ padding: '15px 20px', margin: 0, background: '#007bff', color: 'white', fontSize: '16px', fontWeight: '600' }}>
-                            Daftar Member Aktif
+                        <h3 style={{ padding: '15px 20px', margin: 0, background: '#007bff', color: 'white', fontSize: '16px', fontWeight: '600', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span>Daftar Member Aktif</span>
+                            <span style={{ background: 'rgba(255,255,255,0.2)', padding: '4px 10px', borderRadius: '20px', fontSize: '13px', fontWeight: 'normal' }}>
+                                Total: {totalMembersCount || members.length} Member
+                            </span>
                         </h3>
                         <div style={{ overflowX: 'auto', flex: 1 }}>
                             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -353,6 +379,31 @@ export default function Members({ onHome, user }) {
                                 </tbody>
                             </table>
                         </div>
+                        
+                        {/* Pagination Controls */}
+                        {totalPages > 0 && (
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '15px 20px', background: '#f8fafc', borderTop: '1px solid #e5e7eb' }}>
+                                <span style={{ fontSize: 13, color: '#64748b', fontWeight: 'bold' }}>
+                                    Halaman {currentPage} dari {totalPages}
+                                </span>
+                                <div style={{ display: 'flex', gap: 5 }}>
+                                    <button 
+                                        onClick={() => handlePageChange(currentPage - 1)}
+                                        disabled={currentPage === 1}
+                                        style={{ padding: '6px 12px', background: currentPage === 1 ? '#e2e8f0' : '#007bff', color: currentPage === 1 ? '#94a3b8' : 'white', border: 'none', borderRadius: 4, cursor: currentPage === 1 ? 'not-allowed' : 'pointer', fontSize: 12, fontWeight: 'bold' }}
+                                    >
+                                        Sebelumnya
+                                    </button>
+                                    <button 
+                                        onClick={() => handlePageChange(currentPage + 1)}
+                                        disabled={currentPage === totalPages}
+                                        style={{ padding: '6px 12px', background: currentPage === totalPages ? '#e2e8f0' : '#007bff', color: currentPage === totalPages ? '#94a3b8' : 'white', border: 'none', borderRadius: 4, cursor: currentPage === totalPages ? 'not-allowed' : 'pointer', fontSize: 12, fontWeight: 'bold' }}
+                                    >
+                                        Selanjutnya
+                                    </button>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
             </div>

@@ -6,7 +6,7 @@ export async function POST(req) {
     try {
         const { username, password } = await req.json();
 
-        const [rows] = await db.execute('SELECT * FROM User WHERE username = ?', [username]);
+        const [rows] = await db.execute('SELECT * FROM user WHERE username = ?', [username]);
         const user = rows[0];
 
         if (!user || user.password !== password) { // Simple password check for now

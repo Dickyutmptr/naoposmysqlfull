@@ -27,6 +27,9 @@ export default function POS({ onHome, onHistory, user }) {
     // Global Settings State
     const [globalSettings, setGlobalSettings] = useState({ member: 5, owner: 100 });
 
+    // Success Modal State
+    const [successReceipt, setSuccessReceipt] = useState(null);
+
     // Initial Fetch
     useEffect(() => {
         fetchProducts();
@@ -142,11 +145,13 @@ export default function POS({ onHome, onHistory, user }) {
         setIsSearchingMember(true);
         try {
             const res = await fetch(`/api/members/search?q=${memberQuery}`);
-            const data = await res.json();
-            if (data && data.length > 0) {
-                setMember(data[0]);
+            const result = await res.json();
+            const items = result.data || result; // Backward compatibility
+
+            if (items && items.length > 0) {
+                setMember(items[0]);
                 setMemberQuery('');
-                let name = data[0].name;
+                let name = items[0].name;
                 setCustomerName(name); // Auto-fill customer name
                 console.log(`Member Found: ${name}`);
             } else {
@@ -168,7 +173,8 @@ export default function POS({ onHome, onHistory, user }) {
         // Leaving it might be better if they just want to remove the discount but keep name.
     }
 
-    const printReceipt = (orderData) => {
+    // === START PRINT KOMPUTER / LAPTOP ===
+    const printReceipt = (orderData, isCopy = false) => {
         const getReceiptHTML = (isCopy = false) => `
             <div style="font-family: 'Courier New', monospace; font-size: 14px; font-weight: bold; width: 100%; max-width: 58mm; margin: 0 auto; padding: 0; color: #000; background: #fff;">
                 <div style="text-align: center; margin-bottom: 5px;">
@@ -264,18 +270,18 @@ export default function POS({ onHome, onHistory, user }) {
             </div>
         `;
 
-        const printSingle = (isCopy) => {
+        const printSingle = (copyFlag) => {
             const html = `
                 <html>
                 <head>
-                    <title>Receipt ${isCopy ? '(Copy)' : ''}</title>
+                    <title>Receipt ${copyFlag ? '(Copy)' : ''}</title>
                     <style>
                         @page { margin: 0; size: 58mm auto; }
                         body { margin: 0; padding: 0; width: 58mm; background: white; color: black; }
                     </style>
                 </head>
                 <body>
-                    ${getReceiptHTML(isCopy)}
+                    ${getReceiptHTML(copyFlag)}
                 </body>
                 </html>
             `;
@@ -297,14 +303,84 @@ export default function POS({ onHome, onHistory, user }) {
             }, 500);
         };
 
-        // Print struk asli
-        printSingle(false);
-
-        // Print struk copy dengan jeda 3 detik
-        setTimeout(() => {
-            printSingle(true);
-        }, 3000);
+        printSingle(isCopy);
     };
+    // === END PRINT KOMPUTER / LAPTOP ===
+
+    // === START PRINT ANDROID RAWBT ===
+    function printKeRawBT(base64Data) {
+        // Menggunakan window.location.href kembali agar izin intent tidak di-blokir oleh browser Android
+        window.location.href = "intent:base64," + base64Data + "#Intent;scheme=rawbt;package=ru.a402d.rawbtprinter;end;";
+    }
+    // === END PRINT ANDROID RAWBT ===
+
+    // === OUTPUT TEKS PRINT ANDROID ===
+    const padCenter = (str, len = 32) => {
+        if (str.length >= len) return str.substring(0, len);
+        const p = Math.floor((len - str.length) / 2);
+        return " ".repeat(p) + str + " ".repeat(len - str.length - p);
+    };
+
+    const padLR = (l, r, len = 32) => {
+        const strL = String(l);
+        const strR = String(r);
+        if (strL.length + strR.length >= len) {
+            return strL.substring(0, len - strR.length - 1) + " " + strR;
+        }
+        return strL + " ".repeat(len - strL.length - strR.length) + strR;
+    };
+
+    const generatePlainTextReceipt = (receiptData, isCopy = false) => {
+        let txt = "";
+        txt += padCenter("NAO COFFEE & WRAP") + "\n";
+        txt += padCenter("Jl. Boni, RT 001/RW 004, Parigi") + "\n";
+        txt += padCenter("Pd. Aren, Tangerang Selatan") + "\n";
+        if (isCopy) txt += padCenter("*** COPY ***") + "\n";
+        txt += "--------------------------------\n";
+
+        txt += padCenter("ANTRIAN") + "\n";
+        txt += padCenter(String(receiptData.queueNumber || receiptData.orderId.split('-')[1])) + "\n";
+        txt += "--------------------------------\n";
+
+        txt += padLR(new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }),
+            new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', hour12: false })) + "\n";
+        txt += padLR("Order ID", receiptData.orderId) + "\n";
+        txt += padLR("Kasir", user?.name || "Cashier") + "\n";
+        txt += padLR("Pelanggan", receiptData.customerName || "Guest") + "\n";
+        if (receiptData.tableNumber) {
+            txt += padLR("Meja", receiptData.tableNumber) + "\n";
+        }
+        txt += "--------------------------------\n";
+
+        receiptData.items.forEach(item => {
+            txt += item.name + "\n";
+            if (item.note) {
+                txt += "  (" + item.note + ")\n";
+            }
+            const qtyStr = `${item.qty}x ${rupiah(item.price)}`;
+            txt += padLR(qtyStr, rupiah(item.price * item.qty)) + "\n";
+        });
+
+        txt += "--------------------------------\n";
+        txt += padLR("Subtotal", rupiah(receiptData.totalAmount || 0)) + "\n";
+        if (receiptData.discountAmount > 0) {
+            const discLabel = `Disc. ${receiptData.categoryName || 'Mbr'}`;
+            txt += padLR(discLabel, `-${rupiah(receiptData.discountAmount)}`) + "\n";
+        }
+        txt += padLR("SC (3%)", rupiah(receiptData.serviceCharge || 0)) + "\n";
+        txt += padLR("PB1 (10%)", rupiah(receiptData.taxAmount || 0)) + "\n";
+        txt += "--------------------------------\n";
+        txt += padLR("TOTAL", rupiah(receiptData.finalAmount)) + "\n";
+        txt += "--------------------------------\n";
+        txt += padCenter(receiptData.paymentMethod.toUpperCase()) + "\n";
+        txt += "--------------------------------\n";
+        txt += padCenter("Terima Kasih") + "\n\n\n";
+
+
+        return txt;
+    };
+    // === END OUTPUT TEKS PRINT ANDROID ===
+
 
     const handleCheckout = async () => {
         if (cart.length === 0) return alert('Keranjang kosong');
@@ -381,67 +457,17 @@ export default function POS({ onHome, onHistory, user }) {
                 tableNumber: tableNumber
             };
 
-            // --- PRINT BERJALAN DARI LAPTOP/PC DARI SINI ---
-            printReceipt(receiptData);
-            // --- SAMPAI SINI (LAPTOP/PC) ---
-
-            /* JIKA INGIN BISA PRINT BERJALAN DI ANDROID MAKA PAKAI YANG INI. MULAI DARI SINI 
-            
-            // 1. Fungsi Print RawBT
-            const printKeRawBT = (base64Data) => {
-                window.location.href = "intent:base64," + base64Data + "#Intent;scheme=rawbt;package=ru.a402d.rawbtprinter;end;";
-            };
-
-            // 2. Format Teks Struk
-            let strukText = "      NAO COFFEE & WRAP      \n";
-            strukText += "Jl. Boni, Pd. Aren, Tangsel\n";
-            strukText += "--------------------------------\n";
-            strukText += "Antrian: " + receiptData.queueNumber + "\n";
-            strukText += "Order ID: " + receiptData.orderId + "\n";
-            strukText += "Kasir: " + (user?.name || 'Cashier') + "\n";
-            strukText += "Pelanggan: " + receiptData.customerName + "\n";
-            if (receiptData.tableNumber) {
-                strukText += "Meja: " + receiptData.tableNumber + "\n";
+            // --- Panggil Fungsi Print Utama ---
+            const isAndroid = /android/i.test(navigator.userAgent);
+            if (isAndroid) {
+                const plainText = generatePlainTextReceipt(receiptData, false);
+                const base64Data = btoa(plainText);
+                printKeRawBT(base64Data);
+            } else {
+                printReceipt(receiptData, false);
             }
-            strukText += "--------------------------------\n";
-            
-            receiptData.items.forEach(item => {
-                strukText += item.name + "\n";
-                // Formatting harga dan qty agar pas di line printer
-                let qtyPrice = item.qty + "x " + item.price;
-                let totalLine = "" + (item.price * item.qty);
-                // Hitung spasi (asumsi printer thermal 32 karakter per baris)
-                let spaces = 32 - qtyPrice.length - totalLine.length;
-                if(spaces < 1) spaces = 1;
-                strukText += qtyPrice + " ".repeat(spaces) + totalLine + "\n";
-                if(item.note) {
-                    strukText += "  (" + item.note + ")\n";
-                }
-            });
-            
-            strukText += "--------------------------------\n";
-            strukText += "Subtotal: " + receiptData.totalAmount + "\n";
-            if(receiptData.discountAmount > 0) {
-                strukText += "Disc: -" + receiptData.discountAmount + "\n";
-            }
-            strukText += "SC (3%): " + receiptData.serviceCharge + "\n";
-            strukText += "PB1 (10%): " + receiptData.taxAmount + "\n";
-            strukText += "--------------------------------\n";
-            strukText += "TOTAL:   " + receiptData.finalAmount + "\n";
-            strukText += "--------------------------------\n";
-            strukText += "Pembayaran: " + receiptData.paymentMethod.toUpperCase() + "\n";
-            strukText += "--------------------------------\n";
-            strukText += "         Terima Kasih           \n\n\n\n";
-
-            // 3. Konversi ke Base64 dan Kirim Intent BT Printer
-            try {
-                const base64Str = btoa(strukText);
-                printKeRawBT(base64Str);
-            } catch (e) {
-                console.error('Gagal convert struk', e);
-            }
-            
-            SAMPAI SINI (ANDROID) */
+            // --- Tampilkan Output Berhasil ---
+            setSuccessReceipt(receiptData);
 
             // Reset
             setCart([]);
@@ -776,6 +802,60 @@ export default function POS({ onHome, onHistory, user }) {
                     </button>
                 </div>
             </div>
+
+            {/* Success Print Popup Modal */}
+            {successReceipt && (
+                <div style={{
+                    position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+                    background: 'rgba(15, 52, 96, 0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 99999,
+                    backdropFilter: 'blur(4px)'
+                }}>
+                    <div className="animate-fade-in" style={{
+                        background: '#ffffff', padding: '30px 40px', borderRadius: 20, width: '90%', maxWidth: 450,
+                        border: '1px solid #cbd5e1', boxShadow: '0 15px 35px rgba(0,0,0,0.15)', textAlign: 'center'
+                    }}>
+                        <div style={{ background: '#dcfce7', color: '#22c55e', width: 70, height: 70, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px', fontSize: 36 }}>
+                            ✓
+                        </div>
+                        <h3 style={{ color: '#0f3460', fontSize: 24, fontWeight: 'bold', margin: '0 0 10px 0' }}>
+                            Transaksi Berhasil!
+                        </h3>
+                        <p style={{ color: '#64748b', marginBottom: 25, fontSize: 16 }}>
+                            Struk asli telah dikirim ke printer. Apakah Anda ingin mencetak struk kedua (Copy)?
+                        </p>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '15px' }}>
+                            <button
+                                onClick={() => {
+                                    const isAndroid = /android/i.test(navigator.userAgent);
+                                    if (isAndroid) {
+                                        const plainText = generatePlainTextReceipt(successReceipt, true);
+                                        const base64Data = btoa(plainText);
+                                        printKeRawBT(base64Data);
+                                    } else {
+                                        printReceipt(successReceipt, true);
+                                    }
+                                }}
+                                style={{
+                                    padding: '16px', background: 'var(--primary-blue)', color: '#fff', border: 'none', borderRadius: 12, cursor: 'pointer', fontWeight: 'bold', fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)'
+                                }}
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+                                PRINT COPY
+                            </button>
+
+                            <button
+                                onClick={() => setSuccessReceipt(null)}
+                                style={{
+                                    padding: '14px', background: '#f1f5f9', color: '#475569', border: 'none', borderRadius: 12, cursor: 'pointer', fontWeight: 'bold', fontSize: 15
+                                }}
+                            >
+                                SELESAI
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

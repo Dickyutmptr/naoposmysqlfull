@@ -258,6 +258,18 @@ export default function Inventory({ onHome, user }) {
                                 style={{ margin: 0, background: 'white', color: 'black', border: '1px solid #ccc' }}
                             />
                         </div>
+                        {user?.role === 'admin' && (
+                            <div style={{ flex: 1 }}>
+                                <label style={{ fontSize: 12, color: 'black' }}>Batas Min. Stok</label>
+                                <input
+                                    type="number"
+                                    placeholder="1000"
+                                    value={newItem.minStockThreshold}
+                                    onChange={e => setNewItem({ ...newItem, minStockThreshold: e.target.value })}
+                                    style={{ margin: 0, background: 'white', color: 'black', border: '1px solid #ccc' }}
+                                />
+                            </div>
+                        )}
                         <div style={{ width: 100 }}>
                             <label style={{ fontSize: 12, color: 'black' }}>Satuan</label>
                             <select

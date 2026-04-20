@@ -25,7 +25,7 @@ export async function GET(request) {
 
         // Fetch completed orders
         const [ordersRaw] = await db.execute(
-            'SELECT * FROM \`Order\` WHERE createdAt >= ? AND createdAt <= ? AND status = "completed" ORDER BY createdAt ASC',
+            'SELECT * FROM \`order\` WHERE createdAt >= ? AND createdAt <= ? AND status = "completed" ORDER BY createdAt ASC',
             [start, end]
         );
 
@@ -34,8 +34,8 @@ export async function GET(request) {
             const orderIds = orders.map(o => o.id);
             const [fetchedItems] = await db.query(
                 `SELECT oi.*, p.name as productName, p.hpp as productHpp 
-                FROM OrderItem oi 
-                LEFT JOIN Product p ON oi.productId = p.id 
+                FROM orderitem oi 
+                LEFT JOIN product p ON oi.productId = p.id 
                 WHERE oi.orderId IN (?)`,
                 [orderIds]
             );
@@ -53,7 +53,7 @@ export async function GET(request) {
         }
 
         const [cancelledCountResult] = await db.execute(
-            'SELECT COUNT(*) as count FROM \`Order\` WHERE createdAt >= ? AND createdAt <= ? AND status = "cancelled"',
+            'SELECT COUNT(*) as count FROM \`order\` WHERE createdAt >= ? AND createdAt <= ? AND status = "cancelled"',
             [start, end]
         );
         const cancelledCount = cancelledCountResult[0].count;

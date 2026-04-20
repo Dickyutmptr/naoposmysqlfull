@@ -6,8 +6,8 @@ export async function GET() {
     try {
         const [members] = await db.execute(`
             SELECT m.*, 
-            (SELECT COUNT(*) FROM \`Order\` o WHERE o.memberId = m.id AND o.status = 'completed') as _count_orders
-            FROM Member m 
+            (SELECT COUNT(*) FROM \`order\` o WHERE o.memberId = m.id AND o.status = 'completed') as _count_orders
+            FROM member m 
             ORDER BY m.createdAt DESC
         `);
 
@@ -37,17 +37,17 @@ export async function POST(request) {
             return NextResponse.json({ error: 'Name and Phone Number are required' }, { status: 400 });
         }
 
-        const [existing] = await db.execute('SELECT id FROM Member WHERE phoneNumber = ?', [phoneNumber]);
+        const [existing] = await db.execute('SELECT id FROM member WHERE phoneNumber = ?', [phoneNumber]);
         if (existing.length > 0) {
             return NextResponse.json({ error: 'Phone number already exists' }, { status: 409 });
         }
 
         const [result] = await db.execute(
-            'INSERT INTO Member (name, phoneNumber, category, discount, createdAt, updatedAt) VALUES (?, ?, ?, ?, NOW(), NOW())',
+            'INSERT INTO member (name, phoneNumber, category, discount, createdAt, updatedAt) VALUES (?, ?, ?, ?, NOW(), NOW())',
             [name, phoneNumber, category || 'member', discount !== undefined ? parseFloat(discount) : 0]
         );
 
-        const [newMember] = await db.execute('SELECT * FROM Member WHERE id = ?', [result.insertId]);
+        const [newMember] = await db.execute('SELECT * FROM member WHERE id = ?', [result.insertId]);
         return NextResponse.json(newMember[0], { status: 201 });
     } catch (error) {
         console.error(error);
@@ -64,7 +64,7 @@ export async function PUT(request) {
             return NextResponse.json({ error: 'ID, Name, and Phone Number are required' }, { status: 400 });
         }
 
-        const [existing] = await db.execute('SELECT id FROM Member WHERE phoneNumber = ?', [phoneNumber]);
+        const [existing] = await db.execute('SELECT id FROM member WHERE phoneNumber = ?', [phoneNumber]);
         if (existing.length > 0 && existing[0].id !== parseInt(id)) {
             return NextResponse.json({ error: 'Phone number already exists' }, { status: 409 });
         }
@@ -74,7 +74,7 @@ export async function PUT(request) {
             [name, phoneNumber, category || 'member', discount !== undefined ? parseFloat(discount) : 0, parseInt(id)]
         );
 
-        const [updatedMember] = await db.execute('SELECT * FROM Member WHERE id = ?', [parseInt(id)]);
+        const [updatedMember] = await db.execute('SELECT * FROM member WHERE id = ?', [parseInt(id)]);
         return NextResponse.json(updatedMember[0]);
     } catch (error) {
         console.error(error);
@@ -91,7 +91,7 @@ export async function DELETE(request) {
             return NextResponse.json({ error: 'ID is required' }, { status: 400 });
         }
 
-        await db.execute('DELETE FROM Member WHERE id = ?', [parseInt(id)]);
+        await db.execute('DELETE FROM member WHERE id = ?', [parseInt(id)]);
         return NextResponse.json({ success: true });
     } catch (error) {
         console.error(error);

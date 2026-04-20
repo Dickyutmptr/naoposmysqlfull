@@ -12,7 +12,7 @@ async function generateOrderId(connection) {
     }).split('/').join('');
 
     const [lastOrders] = await connection.execute(
-        'SELECT orderId FROM \`Order\` WHERE orderId LIKE ? ORDER BY id DESC LIMIT 1',
+        'SELECT orderId FROM \`order\` WHERE orderId LIKE ? ORDER BY id DESC LIMIT 1',
         [`NB${dateStr}-%`]
     );
 
@@ -36,8 +36,8 @@ export async function GET(request) {
 
         const skip = (page - 1) * limit;
 
-        let ordersQuery = 'SELECT * FROM \`Order\`';
-        let countQuery = 'SELECT COUNT(*) as total FROM \`Order\`';
+        let ordersQuery = 'SELECT * FROM \`order\`';
+        let countQuery = 'SELECT COUNT(*) as total FROM \`order\`';
         const queryParams = [];
 
         if (search) {
@@ -59,9 +59,9 @@ export async function GET(request) {
             const orderIds = orders.map(o => o.id);
             const [fetchedItems] = await db.query(`
                 SELECT oi.*, p.name as productName, c.name as categoryName, c.id as categoryId 
-                FROM OrderItem oi 
-                LEFT JOIN Product p ON oi.productId = p.id 
-                LEFT JOIN Category c ON p.categoryId = c.id 
+                FROM orderitem oi 
+                LEFT JOIN product p ON oi.productId = p.id 
+                LEFT JOIN category c ON p.categoryId = c.id 
                 WHERE oi.orderId IN (?)
             `, [orderIds]);
             items = fetchedItems;
@@ -122,15 +122,15 @@ export async function POST(request) {
 
         try {
             for (const item of cart) {
-                const [productRows] = await connection.execute('SELECT id, name FROM Product WHERE id = ?', [item.id]);
+                const [productRows] = await connection.execute('SELECT id, name FROM product WHERE id = ?', [item.id]);
                 if (productRows.length === 0) throw new Error(`Product ${item.nama || item.name} not found`);
 
-                const [recipes] = await connection.execute('SELECT * FROM Recipe WHERE productId = ?', [item.id]);
+                const [recipes] = await connection.execute('SELECT * FROM recipe WHERE productId = ?', [item.id]);
 
                 if (recipes.length > 0) {
                     for (const recipe of recipes) {
                         const required = recipe.amount * item.qty;
-                        const [ingredientRows] = await connection.execute('SELECT stock, name FROM Ingredient WHERE id = ? FOR UPDATE', [recipe.ingredientId]);
+                        const [ingredientRows] = await connection.execute('SELECT stock, name FROM ingredient WHERE id = ? FOR UPDATE', [recipe.ingredientId]);
 
                         if (ingredientRows.length === 0) {
                             throw new Error(`Bahan untuk ${productRows[0].name} tidak ditemukan`);
@@ -148,10 +148,10 @@ export async function POST(request) {
             let needsBar = false;
 
             for (const item of cart) {
-                const [productRows] = await connection.execute('SELECT categoryId FROM Product WHERE id = ?', [item.id]);
+                const [productRows] = await connection.execute('SELECT categoryId FROM product WHERE id = ?', [item.id]);
                 if (productRows.length > 0) {
                     const categoryId = productRows[0].categoryId;
-                    const [catRows] = await connection.execute('SELECT name FROM Category WHERE id = ?', [categoryId]);
+                    const [catRows] = await connection.execute('SELECT name FROM category WHERE id = ?', [categoryId]);
                     if (catRows.length > 0) {
                         const catStatus = catRows[0].name.toLowerCase().trim();
                         if (['makanan', 'snack', 'snacks', 'cemilan', 'makanan & snack', 'makanan dan snack'].includes(catStatus)) {
@@ -170,7 +170,7 @@ export async function POST(request) {
             const initialStatus = (!needsKitchen && !needsBar) ? 'completed' : 'pending';
 
             const [orderResult] = await connection.execute(
-                `INSERT INTO \`Order\` (
+                `INSERT INTO \`order\` (
                     orderId, queueNumber, customerName, tableNumber, memberId, totalAmount, taxAmount, discountAmount, serviceCharge, finalAmount, paymentMethod, status, kitchenStatus, barStatus, userId, createdAt, updatedAt
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
                 [
@@ -184,15 +184,15 @@ export async function POST(request) {
 
             for (const item of cart) {
                 await connection.execute(
-                    'INSERT INTO OrderItem (orderId, productId, qty, price, note) VALUES (?, ?, ?, ?, ?)',
+                    'INSERT INTO orderitem (orderId, productId, qty, price, note) VALUES (?, ?, ?, ?, ?)',
                     [insertedOrderId, item.id, item.qty, item.price, item.notes ? item.notes.join(', ') : '']
                 );
 
-                const [recipes] = await connection.execute('SELECT * FROM Recipe WHERE productId = ?', [item.id]);
+                const [recipes] = await connection.execute('SELECT * FROM recipe WHERE productId = ?', [item.id]);
                 if (recipes.length > 0) {
                     for (const recipe of recipes) {
                         await connection.execute(
-                            'UPDATE Ingredient SET stock = stock - ? WHERE id = ?',
+                            'UPDATE ingredient SET stock = stock - ? WHERE id = ?',
                             [recipe.amount * item.qty, recipe.ingredientId]
                         );
                     }
@@ -229,7 +229,7 @@ export async function PUT(request) {
         }
 
         const updateData = [];
-        let queryUpdate = 'UPDATE \`Order\` SET updatedAt = NOW()';
+        let queryUpdate = 'UPDATE \`order\` SET updatedAt = NOW()';
 
         if (type === 'kitchen') {
             queryUpdate += ", kitchenStatus = 'done'";
@@ -243,13 +243,13 @@ export async function PUT(request) {
 
         await db.execute(queryUpdate, updateData);
 
-        const [orders] = await db.execute('SELECT * FROM \`Order\` WHERE orderId = ?', [orderId]);
+        const [orders] = await db.execute('SELECT * FROM \`order\` WHERE orderId = ?', [orderId]);
         const order = orders[0];
         let finalStatus = order.status;
 
         if (order.kitchenStatus === 'done' && order.barStatus === 'done') {
             finalStatus = 'completed';
-            await db.execute('UPDATE \`Order\` SET status = "completed" WHERE id = ?', [order.id]);
+            await db.execute('UPDATE \`order\` SET status = "completed" WHERE id = ?', [order.id]);
         }
 
         return NextResponse.json({ success: true, order: { ...order, status: finalStatus } });
